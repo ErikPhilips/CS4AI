@@ -1,0 +1,34 @@
+# Build output
+bin/
+obj/
+*.user
+
+# .NET tool packing
+*.nupkg
+
+# IDE
+.vs/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# cs4ai daemon state (none persisted today; reserved)
+.cs4ai/
+
+# cs4ai runtime logs (--debug daemon trace, --log session transcripts)
+cs4ai-daemon.log
+cs4ai_*.log
+
+# Personal-local Claude Code settings (the skills/ subtree IS tracked)
+.claude/settings.local.json
+
+# Local scratch playground — not part of the shipped solution
+/Acme.Lib/
+
+# Private design/working documents — never publish (guard against re-adding local copies)
+/ai-code-editor-design.md
+/version2.md
+/AI-Pragmatics.md

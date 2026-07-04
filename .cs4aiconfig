@@ -1,0 +1,29 @@
+{
+  "canonicalize": "full",
+  "memberOrder": [
+    "const",
+    "field-static",
+    "field-instance",
+    "constructor",
+    "destructor",
+    "delegate",
+    "event",
+    "enum",
+    "interface",
+    "property",
+    "indexer",
+    "method",
+    "nested-struct",
+    "nested-class",
+    "nested-record"
+  ],
+  "accessOrder": [
+    "public",
+    "internal",
+    "protected-internal",
+    "protected",
+    "private-protected",
+    "private"
+  ],
+  "sortWithinGroup": "name"
+}

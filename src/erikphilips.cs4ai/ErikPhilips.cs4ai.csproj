@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>ErikPhilips.Cs4Ai</RootNamespace>
+    <AssemblyName>cs4ai</AssemblyName>
+
+    <!-- NuGet package metadata -->
+    <PackageId>ErikPhilips.Cs4Ai</PackageId>
+    <Version>0.2.44</Version>
+    <PackageReleaseNotes>0.2.4x: The v2 surface. Session-token-first verbs (session/inspect/discover, create/update/rename/delete/move, structure tier, build/run-test/verify), write-through edits with per-type staleness tokens (undo is git's job; verify is a report, not a gate), build/test truth on every result with new-vs-preexisting attribution, transparent auto-daemon with zero handle leakage (--debug trace log), Roslyn 5.6 (C# 14), .slnx-default solution creation, self-distributing Claude Code skill.</PackageReleaseNotes>
+    <Description>Semantic editor for C# code, backed by Roslyn. CLI tool built for AI agents: symbol-shaped reads and edits with staleness-checked write-through, session work-spans, and full build/test truth attached to every result.</Description>
+    <Company>ErikPhilips</Company>
+    <Authors>Erik Philips</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/ErikPhilips/CS4AI</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/ErikPhilips/CS4AI</PackageProjectUrl>
+
+    <!-- Install as the `cs4ai` command via `dotnet tool install` -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>cs4ai</ToolCommandName>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Roslyn: parsing + semantic model + workspaces. 5.x = the C# 14 / .NET 10 line; also gives
+         MSBuildWorkspace native .slnx support. (The 4.11-era Microsoft.Build compile-time pins +
+         NU1903 suppression were dropped with the bump — its MSBuild references carried security
+         advisories that 5.x's no longer do.) -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.6.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.6.0" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.7.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ErikPhilips.Cs4Ai.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <!-- Embed the README into the assembly so the show-readme flag works with no external file. -->
+    <EmbeddedResource Include="..\..\README.md" LogicalName="cs4ai.README.md" />
+  </ItemGroup>
+
+</Project>
