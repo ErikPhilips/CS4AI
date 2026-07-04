@@ -14,12 +14,17 @@ Claude Code skill.
 
 ## Install
 
-```bash
-dotnet tool install --global ErikPhilips.Cs4Ai
+Not on NuGet.org yet — install from source (one script):
+
+```powershell
+git clone https://github.com/ErikPhilips/CS4AI.git
+cd CS4AI
+./install.ps1    # builds, packs, installs the global `cs4ai` tool, installs the Claude Code skill
 ```
 
-Requires the .NET 10 SDK (cs4ai loads workspaces through the SDK's MSBuild). For Claude Code,
-`cs4ai --create-skill "%USERPROFILE%\.claude\skills"` installs the agent-facing skill.
+Requires the .NET 10 SDK (cs4ai loads workspaces through the SDK's MSBuild). Built and tested
+on Windows; Linux is untested. To refresh the Claude Code skill later:
+`cs4ai --create-skill "%USERPROFILE%\.claude\skills"`.
 
 ## The protocol in one block
 
