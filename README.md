@@ -42,6 +42,10 @@ A session is a **work-span, not a transaction**: there is no commit or discard. 
 disk the moment it succeeds and carries a trailing `[build …]` block, so the agent always knows
 whether it just broke the build — and whether a diagnostic is new (`+`) or was already there.
 
+To see what cs4ai **says back** — the frames, tokens, notes, and build blocks of a complete real
+session — read [examples/rename-walkthrough.md](examples/rename-walkthrough.md) (a captured `--log`
+transcript, lightly annotated).
+
 ## Quick reference
 
 ```bash
