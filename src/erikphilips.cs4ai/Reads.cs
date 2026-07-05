@@ -135,14 +135,23 @@ internal static class Reads
             sb.AppendLine();
             sb.Append("Referenced by:");
             var refs = await SymbolFinder.FindReferencesAsync(sym, view!, ct);
-            var incoming = new List<string>();
+            var occurrences = new List<(string path, int line)>();
             foreach (var rs in refs)
                 foreach (var loc in rs.Locations)
                 {
                     var ls = loc.Location.GetLineSpan();
-                    incoming.Add($"  {host.Relativize(ls.Path)}:{ls.StartLinePosition.Line + 1}");
+                    occurrences.Add((host.Relativize(ls.Path), ls.StartLinePosition.Line + 1));
                 }
-            sb.Append(' ').Append('[').Append(incoming.Count).AppendLine("]");
+
+            // The count is per OCCURRENCE (the set rename rewrites — two chained calls on one line
+            // are two call sites), but duplicate path:line entries read as a glitch: collapse to one
+            // entry per line, annotating multiples with ×N.
+            var incoming = occurrences
+                .GroupBy(o => o)
+                .OrderBy(g => g.Key.path, StringComparer.Ordinal).ThenBy(g => g.Key.line)
+                .Select(g => $"  {g.Key.path}:{g.Key.line}{(g.Count() > 1 ? $" ×{g.Count()}" : "")}")
+                .ToList();
+            sb.Append(' ').Append('[').Append(occurrences.Count).AppendLine("]");
             foreach (var line in incoming) sb.AppendLine(line);
             if (incoming.Count == 0) sb.AppendLine("  (none)");
 
