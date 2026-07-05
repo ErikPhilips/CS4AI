@@ -50,14 +50,20 @@ internal static class BuildOutcomes
         $"{d.Id}|{relativize(d.Location.GetLineSpan().Path)}|{d.GetMessage()}";
 
     /// <summary>The frozen baseline: every error+warning key present at session open (and after a
-    /// structure-op rebase, the caller keeps the original — it is NOT re-seeded).</summary>
-    public static async Task<HashSet<string>> BaselineKeysAsync(
+    /// structure-op rebase, the caller keeps the original — it is NOT re-seeded). Also returns the
+    /// Roslyn ERROR count so the caller can compare the workspace view against the real build's
+    /// (a large excess means the load resolved references against a broken/unrestored tree).</summary>
+    public static async Task<(HashSet<string> keys, int errorCount)> BaselineKeysAsync(
         Solution sol, Func<string?, string> relativize, CancellationToken ct)
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
+        var errors = 0;
         await foreach (var d in DiagnosticsAsync(sol, ct))
+        {
             keys.Add(Key(d, relativize));
-        return keys;
+            if (d.Severity == DiagnosticSeverity.Error) errors++;
+        }
+        return (keys, errors);
     }
 
     public static async Task<BuildOutcome> ComputeAsync(

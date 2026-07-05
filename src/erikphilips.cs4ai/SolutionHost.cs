@@ -40,6 +40,10 @@ internal sealed class EditSession
     /// <summary>Failed-test names at session open, computed lazily on first <c>run-test</c>/<c>verify</c>.</summary>
     public HashSet<string>? TestBaseline { get; set; }
 
+    /// <summary>Non-null when the Roslyn view carries errors the real opening build didn't — the
+    /// workspace loaded degraded and semantic ops may be incomplete. Rendered in the session frame.</summary>
+    public string? HealthNote { get; set; }
+
     /// <summary>Set when the session was opened with <c>--log</c>: every command is appended to
     /// <see cref="CommandLog"/> and the whole transcript is flushed to a file on <c>verify</c>.</summary>
     public bool LoggingEnabled { get; set; }
@@ -373,7 +377,7 @@ internal sealed class SolutionHost : IAsyncDisposable
         try
         {
             var fresh = await GetCommittedSolutionAsync(ct);
-            _session.RoslynBaseline = await BuildOutcomes.BaselineKeysAsync(fresh, Relativize, ct);
+            _session.RoslynBaseline = (await BuildOutcomes.BaselineKeysAsync(fresh, Relativize, ct)).keys;
         }
         catch { /* unloadable in this state; code edits surface it, delete-reference recovers */ }
 
@@ -456,14 +460,22 @@ internal sealed class SolutionHost : IAsyncDisposable
 
     private async Task<EditSession> MintSessionAsync(CancellationToken ct)
     {
+        // Full build FIRST — its implicit restore writes obj/project.assets.json, which is exactly
+        // where the workspace load below resolves PackageReferences from. Loading first on an
+        // unrestored tree (fresh clone/copy) locked a degraded view in for the daemon's lifetime:
+        // every package type unresolved (hundreds of phantom CS* errors absorbed as "preexisting"),
+        // and every semantic op — rename binding, SelfHeal's CS0246 judgment — ran against that
+        // broken view. Session open is the deliberately-slow amortized step; same work, safe order.
+        var run = await BuildAndTest.RunAsync(SlnxPath, ct);
+
         var live = await GetCommittedSolutionAsync(ct);
         var random = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var token = DaemonProtocol.NewSessionToken(PipeKey, random);
         _session = new EditSession { Token = token };
 
-        // Seed both baselines at open via a full build, so the agent knows exactly where it stands
-        // and a later add-reference NU* (absent now) reads as `new`. One build, amortized over the span.
-        await SeedBaselinesAsync(live, ct);
+        // Seed both baselines at open, so the agent knows exactly where it stands and a later
+        // add-reference NU* (absent now) reads as `new`. One build, amortized over the span.
+        await SeedBaselinesAsync(live, run, ct);
         return _session;
     }
 
@@ -471,17 +483,28 @@ internal sealed class SolutionHost : IAsyncDisposable
     /// <see cref="EditSession.RoslynBaseline"/> (CS\* for code-edit deltas) and
     /// <see cref="EditSession.BuildBaseline"/> (full CS\*+NU\*+MSBuild for graph/verify deltas). The
     /// returned outcome is the full picture with everything tagged <c>preexisting</c> (the floor).</summary>
-    private async Task<BuildOutcome> SeedBaselinesAsync(Solution live, CancellationToken ct)
+    private async Task<BuildOutcome> SeedBaselinesAsync(Solution live, BuildAndTest.Result run, CancellationToken ct)
     {
-        _session!.RoslynBaseline = await BuildOutcomes.BaselineKeysAsync(live, Relativize, ct);
-        // Build + test at open so the test baseline means "failing at open" — the floor for the
-        // new-vs-preexisting attribution. Capturing it lazily on the first run-test/verify (as it was)
-        // absorbed a test the agent added mid-span, hiding a red suite behind an empty delta (bug #4).
-        var run = await BuildAndTest.RunAsync(SlnxPath, ct);
+        var (roslynKeys, roslynErrors) = await BuildOutcomes.BaselineKeysAsync(live, Relativize, ct);
+        _session!.RoslynBaseline = roslynKeys;
+        // The build+test ran at open (BEFORE the workspace load) so the test baseline means
+        // "failing at open" — the floor for the new-vs-preexisting attribution. Capturing it lazily
+        // on the first run-test/verify (as it was) absorbed a test the agent added mid-span,
+        // hiding a red suite behind an empty delta (bug #4).
         _session.BuildBaseline = BuildOutcomes.BuildBaselineKeys(run.Diagnostics, Relativize);
         _session.TestBaseline = run.BuildPassed
             ? new HashSet<string>(run.TestFailures, StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal); // no build → nothing to diff against
+
+        // Belt-and-suspenders: build-first prevents the unrestored-tree degradation, but a workspace
+        // can still load broken (SDK mismatch, bad csproj). If Roslyn sees errors the real build
+        // doesn't, semantic ops are running on a lie — say so in the session frame, don't be silent.
+        var buildErrors = run.Diagnostics.Count(d => d.Severity == "error");
+        _session.HealthNote = roslynErrors > buildErrors
+            ? $"workspace-view degraded: {roslynErrors - buildErrors} Roslyn-only error{(roslynErrors - buildErrors == 1 ? "" : "s")} — " +
+              "semantic ops may be incomplete (rename/discover can miss references in unresolved projects)"
+            : null;
+
         var outcome = BuildOutcomes.FromBuild(run.Diagnostics, _session.BuildBaseline, Relativize);
         _session.CachedOutcome = outcome;
         return outcome;
@@ -590,6 +613,7 @@ internal sealed class SolutionHost : IAsyncDisposable
         session.LoggingEnabled = Array.IndexOf(rest, "--log") >= 0;
         var status = new List<string> { $"session {(created ? "created" : "opened")} · {SlnxPath} · {session.Token}" };
         if (session.LoggingEnabled) status.Add($"log: cs4ai_{session.Token}.log");
+        if (session.HealthNote is { } health) status.Add(health);
         // The opening buildOutcome is the floor — where you stand before touching anything.
         return Cs4AiResult.Ok(StatusBody(status, session.CachedOutcome));
     }
@@ -607,7 +631,7 @@ internal sealed class SolutionHost : IAsyncDisposable
         if (session is null) return await NoSessionRefusalAsync(token, null, ct);
 
         var live = await GetCommittedSolutionAsync(ct);
-        session.RoslynBaseline ??= await BuildOutcomes.BaselineKeysAsync(live, Relativize, ct);
+        session.RoslynBaseline ??= (await BuildOutcomes.BaselineKeysAsync(live, Relativize, ct)).keys;
         var outcome = await BuildOutcomes.ComputeAsync(live, session.RoslynBaseline, Relativize, ct);
         session.CachedOutcome = outcome;
 
@@ -665,8 +689,8 @@ internal sealed class SolutionHost : IAsyncDisposable
         session.LastTests = last;
 
         // Re-seed the baselines to this authoritative floor for any further work in the span.
-        session.RoslynBaseline = await BuildOutcomes.BaselineKeysAsync(
-            await GetCommittedSolutionAsync(ct), Relativize, ct);
+        session.RoslynBaseline = (await BuildOutcomes.BaselineKeysAsync(
+            await GetCommittedSolutionAsync(ct), Relativize, ct)).keys;
         session.BuildBaseline = BuildOutcomes.BuildBaselineKeys(run.Diagnostics, Relativize);
         if (run.BuildPassed)
             session.TestBaseline = new HashSet<string>(run.TestFailures, StringComparer.Ordinal);
