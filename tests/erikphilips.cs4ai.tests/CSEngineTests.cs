@@ -674,6 +674,50 @@ public class CSEngineTests
         Assert.Contains("class Helper", fx.ReadSource("Brand.cs"));
     }
 
+    // ── create --path is project-relative (issue #3) ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task Create_PathSolutionRelative_NormalizedWithNote()
+    {
+        // The reported bug: --path "src/<proj>/Common" (solution-root spelling) was joined onto the
+        // project dir verbatim → src/<proj>/src/<proj>/Common, silently. Fixture project dir is
+        // <root>/src, so "src/Common" is the doubled spelling of "Common".
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        var r = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Person",
+                Body = "public class Person { }", Path = "src/Common",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
+        Assert.Contains("--path is project-relative", r.Output ?? "");
+        Assert.Contains("interpreted as 'Common'", r.Output ?? "");
+        Assert.True(File.Exists(fx.SourceFile("Common/Person.cs")));          // where it belongs
+        Assert.False(File.Exists(fx.SourceFile("src/Common/Person.cs")));    // NOT doubled
+    }
+
+    [Fact]
+    public async Task Create_PathEscapesProject_Rejected()
+    {
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        var r = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Person",
+                Body = "public class Person { }", Path = "../Outside",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeUsage, r.ExitCode);
+        Assert.Contains("escapes the project", r.Output ?? r.Error ?? "");
+    }
+
     // ── rename: stale-comment report (issue #1) ────────────────────────────────────────────────────
 
     [Fact]

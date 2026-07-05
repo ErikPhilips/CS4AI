@@ -134,7 +134,9 @@ internal static class Help
             [--set-attributes '[A],[B]']
 
         A new member into a type, or a new top-level type into a project. The namespace comes from
-        the FQN; --path is the decoupled folder. The kind falls out of parsing --set-body — there is
+        the FQN; --path is the folder INSIDE that project (project-relative — the project also comes
+        from the FQN; a solution-root spelling like src/Proj/Common is auto-corrected with a note,
+        and --path may not escape the project). The kind falls out of parsing --set-body — there is
         no --kind. --set-attributes attaches attributes (a whole set). A member into an existing type
         cites that type's --token <type_…>; a brand-new top-level type cites none. New files get
         file-scoped namespace + inferred usings (echoed back).
@@ -306,8 +308,9 @@ internal static class Help
         the target type (also echoed in every edit response):
         - `create <sess> <new-fqn> --set-body <decl> [--path <dir>] [--in-file <file>]` — new member
           (cite the type's token) or new top-level type (no token). Kind comes from the body; namespace
-          from the FQN. `--in-file` places the type in that file — co-locates into an existing file
-          (namespace must match) or names a new one.
+          from the FQN; `--path` is PROJECT-relative (the project comes from the FQN too — not
+          solution-root-relative). `--in-file` places the type in that file — co-locates into an
+          existing file (namespace must match) or names a new one.
         - `update <sess> <addr> --token <type_…> --set-body <decl>` — replace a member or a whole
           type in place (a type's name/arity must match the address); cascades if the
           signature changed. Facets: `--set-comment`, `--set-namespace`, `--set-usings`,

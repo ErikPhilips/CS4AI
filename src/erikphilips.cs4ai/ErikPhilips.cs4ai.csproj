@@ -11,7 +11,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>ErikPhilips.Cs4Ai</PackageId>
-    <Version>0.2.47</Version>
+    <Version>0.2.48</Version>
     <PackageReleaseNotes>0.2.4x: The v2 surface. Session-token-first verbs (session/inspect/discover, create/update/rename/delete/move, structure tier, build/run-test/verify), write-through edits with per-type staleness tokens (undo is git's job; verify is a report, not a gate), build/test truth on every result with new-vs-preexisting attribution, transparent auto-daemon with zero handle leakage (--debug trace log), Roslyn 5.6 (C# 14), .slnx-default solution creation, self-distributing Claude Code skill.</PackageReleaseNotes>
     <Description>Semantic editor for C# code, backed by Roslyn. CLI tool built for AI agents: symbol-shaped reads and edits with staleness-checked write-through, session work-spans, and full build/test truth attached to every result.</Description>
     <Company>ErikPhilips</Company>

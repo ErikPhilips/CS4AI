@@ -332,6 +332,7 @@ internal sealed class CSEngine : ICSEngine
             coLocateTarget = matches.Count == 1 ? matches[0] : null;
         }
 
+        string? pathNote = null;
         if (coLocateTarget is not null)
         {
             var (coSol, coErr) = await CoLocateTypeAsync(sol, coLocateTarget.Id, member, ns, ct);
@@ -345,7 +346,32 @@ internal sealed class CSEngine : ICSEngine
             var fileName = op.InFile is { } inf
                 ? Path.GetFileName(inf.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ? inf : inf + ".cs")
                 : leaf + ".cs";
-            var folders = (op.Path ?? "").Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+            // --path is PROJECT-relative (the project came from the FQN); the natural shell guess is
+            // solution-root-relative, which joined verbatim doubles the project directory
+            // (src/Proj/src/Proj/…) silently. A --path starting with the project's own directory is
+            // never intentional: strip it and echo the correction. Only the full solution-relative
+            // prefix normalizes — a bare folder that merely shares the project's name stays literal.
+            var rawPath = (op.Path ?? "").Replace('\\', '/').Trim('/');
+            if (rawPath.Length > 0)
+            {
+                if (Path.IsPathRooted(rawPath) || rawPath.Split('/').Contains(".."))
+                    return (sol, Cs4AiResult.UsageError(
+                        $"create --path: '{op.Path}' escapes the project — --path is project-relative " +
+                        "(the project comes from the FQN)."), NoRestate);
+                var relProj = _relativize(projDir).Trim('/');
+                if (relProj.Length > 0 && relProj != "." && !relProj.StartsWith("..", StringComparison.Ordinal) &&
+                    (rawPath.Equals(relProj, StringComparison.OrdinalIgnoreCase) ||
+                     rawPath.StartsWith(relProj + "/", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var stripped = rawPath.Length == relProj.Length ? "" : rawPath[(relProj.Length + 1)..];
+                    pathNote = $"--path is project-relative — '{op.Path}' interpreted as " +
+                               $"'{(stripped.Length == 0 ? "." : stripped)}'";
+                    rawPath = stripped;
+                }
+            }
+
+            var folders = rawPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
             var filePath = Path.Combine(new[] { projDir }.Concat(folders).Append(fileName).ToArray());
 
             // Default-name collision (Result then Result<T> both defaulting to Result.cs): a second
@@ -387,7 +413,7 @@ internal sealed class CSEngine : ICSEngine
         // would frame the non-generic sibling instead of the type just created.
         var arity = ArityOf(plan.NewTypeLeaf!);
         var created = await FindTypeByDocIdAsync(sol, $"T:{ns}.{leaf}{(arity > 0 ? $"`{arity}" : "")}", ct);
-        var note = added.Count > 0 ? "inferred-usings: " + string.Join(", ", added) : null;
+        var note = JoinNotes(pathNote, added.Count > 0 ? "inferred-usings: " + string.Join(", ", added) : null);
         return (sol, null, [new Restate(Ops.Create, created?.GetDocumentationCommentId(), FullBody: true, null, note)]);
     }
 
