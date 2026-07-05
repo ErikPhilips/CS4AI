@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -705,16 +706,23 @@ internal sealed class CSEngine : ICSEngine
             .Where(p => !string.IsNullOrEmpty(p))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var cascadeFiles = new List<string>();
+        var touchedPaths = new HashSet<string>(declPaths, StringComparer.OrdinalIgnoreCase);
         foreach (var pc in newSol.GetChanges(sol).GetProjectChanges())
             foreach (var did in pc.GetChangedDocuments(onlyGetDocumentsWithTextChanges: true))
             {
                 var p = newSol.GetDocument(did)?.FilePath;
-                if (p is not null && !declPaths.Contains(p)) cascadeFiles.Add(_relativize(p));
+                if (p is null) continue;
+                touchedPaths.Add(p);
+                if (!declPaths.Contains(p)) cascadeFiles.Add(_relativize(p));
             }
         var cascadeNote = cascadeFiles.Count > 0
             ? $"references-rewritten: {cascadeFiles.Count} other file{(cascadeFiles.Count == 1 ? "" : "s")} · " +
               string.Join(", ", cascadeFiles.OrderBy(p => p, StringComparer.Ordinal))
             : null;
+
+        // Prose can't be rewritten safely, but it CAN be reported: comment blocks in the touched
+        // files that still say the old name (crefs were rewritten above — anything left is prose).
+        var staleNote = await StaleCommentNoteAsync(newSol, touchedPaths, sym.Name, ct);
 
         // ── rename + --set-file: relocate the renamed type's file in the same command; one frame. ──
         if (op.File is not null)
@@ -729,7 +737,7 @@ internal sealed class CSEngine : ICSEngine
             if (mErr is { } me) return (newSol, me, NoRestate);
             var combined = $"{oldAddr} -> {op.Destination}" + (mRestate?.Delta is { } d ? $" · {d}" : "");
             return (msol, null, [new Restate(Ops.Rename, shapeDocId, FullBody: false, combined,
-                JoinNotes(cascadeNote, mRestate?.Note))]);
+                JoinNotes(cascadeNote, staleNote, mRestate?.Note))]);
         }
 
         // ── reconcile hint: renaming a type whose (single-type) file no longer matches its name.
@@ -748,7 +756,58 @@ internal sealed class CSEngine : ICSEngine
 
         // Delta body — only the name changed; the frame carries the fresh token.
         return (newSol, null, [new Restate(Ops.Rename, shapeDocId, FullBody: false,
-            $"{oldAddr} -> {op.Destination}", JoinNotes(cascadeNote, hint))]);
+            $"{oldAddr} -> {op.Destination}", JoinNotes(cascadeNote, staleNote, hint))]);
+    }
+
+    /// <summary>Whole-word mentions of <paramref name="oldName"/> in comment trivia of the touched
+    /// files, reported as begin-to-end line blocks (consecutive <c>//</c> lines merge) so a text
+    /// edit can operate on the whole block — cs4ai has no verb for plain comments. Doc-comment
+    /// blocks count too: their crefs were just rewritten, so a remaining mention is prose
+    /// (fixable semantically via update --set-comment).</summary>
+    private async Task<string?> StaleCommentNoteAsync(
+        Solution sol, IReadOnlyCollection<string> touchedPaths, string oldName, CancellationToken ct)
+    {
+        if (touchedPaths.Count == 0 || oldName.Length == 0) return null;
+        var word = new Regex($@"\b{Regex.Escape(oldName)}\b", RegexOptions.CultureInvariant);
+
+        var blocks = new List<(string file, int start, int end, bool hit)>();
+        foreach (var doc in sol.Projects.SelectMany(p => p.Documents))
+        {
+            if (doc.FilePath is not { } fp || !touchedPaths.Contains(fp)) continue;
+            var root = await doc.GetSyntaxRootAsync(ct);
+            if (root is null) continue;
+            var text = await doc.GetTextAsync(ct);
+
+            // Every comment trivia, hit or not — consecutive lines merge into ONE block first, and
+            // a mention anywhere flags the whole block (the report's consumer is a whole-block edit).
+            var pieces = new List<(int start, int end, bool hit)>();
+            foreach (var trivia in root.DescendantTrivia())
+            {
+                if (!trivia.IsKind(SyntaxKind.SingleLineCommentTrivia)
+                    && !trivia.IsKind(SyntaxKind.MultiLineCommentTrivia)
+                    && !trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia)
+                    && !trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia)) continue;
+                var start = text.Lines.GetLinePosition(trivia.SpanStart).Line + 1;
+                var end = text.Lines.GetLinePosition(Math.Max(trivia.Span.End - 1, trivia.SpanStart)).Line + 1;
+                pieces.Add((start, end, word.IsMatch(trivia.ToFullString())));
+            }
+
+            foreach (var (start, end, hit) in pieces.OrderBy(p => p.start))
+            {
+                if (blocks.Count > 0 && blocks[^1].file == fp && start <= blocks[^1].end + 1)
+                    blocks[^1] = (fp, blocks[^1].start, Math.Max(blocks[^1].end, end), blocks[^1].hit || hit);
+                else
+                    blocks.Add((fp, start, end, hit));
+            }
+        }
+
+        blocks.RemoveAll(b => !b.hit);
+        if (blocks.Count == 0) return null;
+        const int cap = 12;
+        var shown = blocks.Take(cap)
+            .Select(b => $"{_relativize(b.file)}:{(b.start == b.end ? $"{b.start}" : $"{b.start}-{b.end}")}");
+        var overflow = blocks.Count > cap ? $" (+{blocks.Count - cap} more)" : "";
+        return $"comments-mention-old-name: {string.Join(" · ", shown)}{overflow} — prose still says '{oldName}'";
     }
 
     /// <summary>Stack note lines under one frame (each renders as its own line).</summary>

@@ -674,6 +674,66 @@ public class CSEngineTests
         Assert.Contains("class Helper", fx.ReadSource("Brand.cs"));
     }
 
+    // ── rename: stale-comment report (issue #1) ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Rename_ReportsStaleCommentBlocks()
+    {
+        // Lines are load-bearing: the // run is 5-6, the doc-comment block is 9.
+        const string src = """
+            namespace Acme;
+
+            public class Calc
+            {
+                // Add sums two ints
+                // and is heavily used
+                public int Add(int a, int b) => a + b;
+
+                /// <summary>Calls Add twice. AddRange is unrelated.</summary>
+                public int Twice(int x) => Add(x, x);
+
+                // AddRange only — whole-word decoy, must NOT be reported
+                public int Other() => 0;
+            }
+            """;
+        using var fx = new FixtureSolution(src);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        var token = await TypeTokenAsync(engine, "Acme.Calc");
+        var r = await engine.ExecuteAsync(
+            [Group(token, new Operation
+            {
+                Op = Ops.Rename, Source = "Acme.Calc.Add(int,int)", Destination = "Plus",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
+        var output = r.Output ?? "";
+        Assert.Contains("comments-mention-old-name:", output);
+        Assert.Contains("Calc.cs:5-6", output);            // the // run, begin-to-end
+        Assert.Contains("Calc.cs:9", output);              // the /// block (prose mention)
+        Assert.DoesNotContain("Calc.cs:12", output);       // 'AddRange' is not a whole-word 'Add'
+        Assert.Contains("prose still says 'Add'", output);
+    }
+
+    [Fact]
+    public async Task Rename_NoStaleComments_NoNote()
+    {
+        using var fx = new FixtureSolution(Source);           // fixture has no comments
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        var token = await TypeTokenAsync(engine, "Acme.Calc");
+        var r = await engine.ExecuteAsync(
+            [Group(token, new Operation
+            {
+                Op = Ops.Rename, Source = "Acme.Calc.Add(int,int)", Destination = "Plus",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
+        Assert.DoesNotContain("comments-mention-old-name", r.Output ?? "");
+    }
+
     // ── update --set-body on a whole TYPE (redeclare in place) ────────────────────────────────────
 
     [Fact]

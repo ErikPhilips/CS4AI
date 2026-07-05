@@ -159,10 +159,13 @@ internal static class Help
         cs4ai rename <sess-token> <address> <new-name> --token <type_…> [--set-file <path>]
 
         Rename a member or type to a new bare name (not an FQN). Every reference rewrites, computed
-        fresh from the live view. --set-file relocates the renamed type's file in the same command
-        (intra-project; git mv when the type is alone in its file, else extract; --in-file for partials).
-        Renaming a type without --set-file, when its single-type file no longer matches, adds a
-        reconcile hint. Writes through to disk immediately.
+        fresh from the live view — including doc-comment crefs. Plain-comment prose cannot rewrite
+        safely, so blocks in the touched files still mentioning the old name are reported instead:
+        `comments-mention-old-name: <file>:<start>-<end> · …` (full block extents, ready for a text
+        edit; doc-comment prose is fixable with update --set-comment). --set-file relocates the
+        renamed type's file in the same command (intra-project; git mv when the type is alone in its
+        file, else extract; --in-file for partials). Renaming a type without --set-file, when its
+        single-type file no longer matches, adds a reconcile hint. Writes through to disk immediately.
         """;
 
     public const string Move = """
