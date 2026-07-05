@@ -151,7 +151,12 @@ internal static class Reads
                 .OrderBy(g => g.Key.path, StringComparer.Ordinal).ThenBy(g => g.Key.line)
                 .Select(g => $"  {g.Key.path}:{g.Key.line}{(g.Count() > 1 ? $" ×{g.Count()}" : "")}")
                 .ToList();
-            sb.Append(' ').Append('[').Append(occurrences.Count).AppendLine("]");
+            // Pre-answer the arithmetic: [22 refs · 20 sites] whenever rows carry ×N, so the header
+            // and the visible row count never invite a recount. Single labeled count when they agree.
+            sb.Append(' ').Append('[').Append(Plural(occurrences.Count, "ref"));
+            if (incoming.Count != occurrences.Count)
+                sb.Append(" · ").Append(Plural(incoming.Count, "site"));
+            sb.AppendLine("]");
             foreach (var line in incoming) sb.AppendLine(line);
             if (incoming.Count == 0) sb.AppendLine("  (none)");
 
@@ -166,6 +171,8 @@ internal static class Reads
 
         return Cs4AiResult.Ok(sb.ToString());
     }
+
+    private static string Plural(int n, string unit) => $"{n} {unit}{(n == 1 ? "" : "s")}";
 
     private static void AppendCategory(StringBuilder sb, string label, List<ISymbol> syms)
     {
