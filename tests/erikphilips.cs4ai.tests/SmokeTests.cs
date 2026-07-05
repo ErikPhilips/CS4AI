@@ -167,6 +167,27 @@ public class SmokeTests
     }
 
     [Fact]
+    public void FromBuild_SameMessageDifferentLine_BothRendered()
+    {
+        // Field incident (issue #18): 4 compiler errors displayed as 3 — identical code+path+message
+        // on different lines collapsed into one row, and the hidden one misdirected the diagnosis.
+        // Line-inclusive display dedup keeps both; a true duplicate (same line, multi-TFM) collapses.
+        const string msg = "'Func<Money>' does not contain a definition for 'Should'";
+        var diags = new List<BuildAndTest.Diag>
+        {
+            new("error", "CS1061", "tests/MoneyTests.cs", 11, msg),
+            new("error", "CS1061", "tests/MoneyTests.cs", 25, msg), // different line — distinct problem
+            new("error", "CS1061", "tests/MoneyTests.cs", 25, msg), // true duplicate — collapses
+        };
+        var outcome = BuildOutcomes.FromBuild(diags, new HashSet<string>(StringComparer.Ordinal), p => p ?? "");
+
+        Assert.Equal(2, outcome.Diagnostics.Count);
+        Assert.Contains(outcome.Diagnostics, d => d.Line == 11);
+        Assert.Contains(outcome.Diagnostics, d => d.Line == 25);
+        Assert.Equal(2, outcome.NewErrors);
+    }
+
+    [Fact]
     public void SkillFile_CommandTemplates_AllPrefixed()
     {
         // A field agent copied a bare `session "Foo.slnx"` from the skill straight into bash →
