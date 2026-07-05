@@ -292,7 +292,8 @@ internal static class Help
           Lead with that token on every later call. The path is optional (defaults to cwd); an absent
           solution is created — as `.slnx` by default (`--format sln` for classic; an explicit
           extension in the path wins).
-        - add `--log` to record the session's commands (with exit codes) to `cs4ai_<token>.log` on `verify`.
+        - add `--log` to record the session's full transcript — every command, its exit code, and its
+          output — to `cs4ai_<token>.log` (live-flushed; finalized on `verify`).
         - add `--debug` to a daemon-spawning command (usually `session`) to trace the daemon's
           lifecycle to `cs4ai-daemon.log` next to the solution — for diagnosing daemon behavior only.
 

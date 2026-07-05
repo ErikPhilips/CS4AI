@@ -548,6 +548,12 @@ public class VerbTests
         Assert.Contains($"cs4ai inspect {sess} Acme.Calc", text);
         Assert.Contains($"cs4ai create {sess} Acme.Calc.Sub(int,int)", text);
         Assert.Contains($"cs4ai verify {sess}", text); // verify logs itself, in its own file
+
+        // Both halves of each exchange (issue #20): the transcript carries the OUTPUT too —
+        // the inspect's frame (with its token) and the create's trailing [build] block.
+        Assert.Contains("[inspect Acme.Calc", text);
+        Assert.Contains("· type_", text);
+        Assert.Contains("[build ", text);
     }
 
     [Fact]
