@@ -49,7 +49,7 @@ internal sealed class EditSession
     public bool LoggingEnabled { get; set; }
 
     /// <summary>The in-memory command transcript — one entry per command,
-    /// <c>"#N exit code: X\n&lt;cmd&gt;"</c>. Empty unless <see cref="LoggingEnabled"/>.</summary>
+    /// <c>"#N exit code: X\n&lt;cmd&gt;\n\n&lt;output&gt;"</c>. Empty unless <see cref="LoggingEnabled"/>.</summary>
     public List<string> CommandLog { get; } = new();
 }
 
@@ -237,6 +237,11 @@ internal sealed class SolutionHost : IAsyncDisposable
 
         int number = (startedIndex ?? session.CommandLog.Count) + 1;
         var entry = $"#{number} exit code: {result.ExitCode}\n{RenderCommandLine(args)}";
+        // The transcript records BOTH halves of the exchange — what cs4ai answered is the half a
+        // post-mortem actually needs. Entries stay anchored by the `#N exit code:` header.
+        var body = result.Output ?? result.Error;
+        if (!string.IsNullOrWhiteSpace(body))
+            entry += "\n\n" + body.TrimEnd('\n');
         if (startedIndex is { } idx && idx < session.CommandLog.Count)
             session.CommandLog[idx] = entry;      // replace the "started" marker in place
         else
