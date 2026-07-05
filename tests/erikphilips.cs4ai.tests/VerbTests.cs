@@ -314,7 +314,7 @@ public class VerbTests
         var r = await m.ExecuteAsync(["discover", sess, "From"]);
         Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
         var output = r.Output!;
-        Assert.Contains("Referenced by: [3]", output);                    // occurrence-true total
+        Assert.Contains("Referenced by: [3 refs · 2 sites]", output);     // header pre-answers the ×2
         Assert.Contains("Calc.cs:10 ×2", output);                         // collapsed, annotated
         Assert.Contains("Calc.cs:11", output);                            // single stays bare
         Assert.Equal(1, output.Split("Calc.cs:10").Length - 1);           // :10 appears exactly once
