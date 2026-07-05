@@ -167,6 +167,22 @@ public class SmokeTests
     }
 
     [Fact]
+    public void SkillFile_CommandTemplates_AllPrefixed()
+    {
+        // A field agent copied a bare `session "Foo.slnx"` from the skill straight into bash →
+        // exit 127 (issue #12). Every copy-able command template must lead with `cs4ai `.
+        string[] verbs = ["session", "inspect", "discover", "create", "update", "rename", "move",
+                          "delete", "create-project", "add-reference", "build", "run-test", "verify",
+                          "init", "reload", "stop-daemon"];
+        foreach (var v in verbs)
+        {
+            Assert.DoesNotContain($"- `{v} ", Help.SkillFile);        // bullet template, bare
+            Assert.DoesNotContain($"`{v} <sess", Help.SkillFile);     // inline template, bare
+        }
+        Assert.Contains("- `cs4ai session ", Help.SkillFile);         // the taught entry point
+    }
+
+    [Fact]
     public void PipeKey_IsStable_AndPrefixesSessionTokens()
     {
         var key1 = DaemonProtocol.PipeKeyFor(@"C:\repos\Foo\Foo.slnx");
