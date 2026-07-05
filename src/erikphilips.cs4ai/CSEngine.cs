@@ -405,15 +405,32 @@ internal sealed class CSEngine : ICSEngine
         if (frameType is null)
             return (sol, Cs4AiResult.UsageError($"update: cannot determine the type for '{op.Source}'."), NoRestate);
 
-        // ── Facets: --set-body re-declares a MEMBER (member-only); --set-comment and --set-attributes
-        //    apply to a type OR a member (a TypeDeclarationSyntax is itself a MemberDeclarationSyntax).
-        //    So reject only --set-body on a type; attributes/doc-comments on a type are valid. ──
+        // ── Facets: --set-body re-declares the addressed thing in place — a member, or a WHOLE type
+        //    (same file, same spot; the cited token makes it deliberate). --set-comment and
+        //    --set-attributes apply to a type OR a member. ──
         if (op.Body is not null || op.XmlComment is not null || op.Attributes is not null)
         {
-            if (op.Body is not null && sym is INamedTypeSymbol)
-                return (sol, Cs4AiResult.UsageError(
-                    $"update: '{AddressResolver.Render(sym)}' is a type — --set-body addresses a member. " +
-                    "Use --set-attributes / --set-comment on a type, or `create` to (re)declare it."), NoRestate);
+            MemberDeclarationSyntax? parsedBody = null;
+            if (op.Body is not null)
+            {
+                parsedBody = SyntaxFactory.ParseMemberDeclaration(op.Body);
+                if (parsedBody is null || parsedBody.ContainsDiagnostics)
+                    return (sol, Cs4AiResult.UsageError("update: --set-body is not a valid declaration."), NoRestate);
+                if (sym is INamedTypeSymbol addressed)
+                {
+                    // Redeclaring a type: the body must be a type-shaped declaration whose name and
+                    // arity match the address — renames go through `rename` (call sites rewritten).
+                    var (bodyName, bodyArity) = TypeNameArity(parsedBody);
+                    if (bodyArity < 0)
+                        return (sol, Cs4AiResult.UsageError(
+                            $"update: '{AddressResolver.Render(sym)}' is a type — --set-body must be a " +
+                            "whole type declaration (class/struct/record/interface/enum/delegate)."), NoRestate);
+                    if (bodyName != addressed.Name || bodyArity != addressed.Arity)
+                        return (sol, Cs4AiResult.UsageError(
+                            $"update --set-body: declares '{RenderTypeDecl(parsedBody)}' but the address is " +
+                            $"'{AddressResolver.Render(sym)}' — name and arity must match; use `rename` to change the name."), NoRestate);
+                }
+            }
 
             var declRef = sym is INamedTypeSymbol tsym
                 ? PickDeclaration(tsym, op.InFile)                       // honor --in-file for partials
@@ -427,18 +444,9 @@ internal sealed class CSEngine : ICSEngine
             if (doc is null) return (sol, Cs4AiResult.FileError("update: document not found."), NoRestate);
             var root = await oldNode.SyntaxTree.GetRootAsync(ct);
 
-            SyntaxNode replacement;
-            if (op.Body is not null)
-            {
-                var newNode = SyntaxFactory.ParseMemberDeclaration(op.Body);
-                if (newNode is null || newNode.ContainsDiagnostics)
-                    return (sol, Cs4AiResult.UsageError("update: --set-body is not a valid member declaration."), NoRestate);
-                replacement = newNode.WithTriviaFrom(oldNode);
-            }
-            else
-            {
-                replacement = oldNode; // facet-only — start from the existing node
-            }
+            SyntaxNode replacement = parsedBody is not null
+                ? parsedBody.WithTriviaFrom(oldNode)
+                : oldNode; // facet-only — start from the existing node
 
             if (op.Attributes is not null)
             {
@@ -1010,6 +1018,15 @@ internal sealed class CSEngine : ICSEngine
         DelegateDeclarationSyntax d => (d.Identifier.Text, d.TypeParameterList?.Parameters.Count ?? 0),
         BaseTypeDeclarationSyntax b => (b.Identifier.Text, 0), // enum
         _ => ("", -1),
+    };
+
+    /// <summary>C#-spelled name of a type-shaped declaration, e.g. <c>Result&lt;T&gt;</c>.</summary>
+    private static string RenderTypeDecl(MemberDeclarationSyntax m) => m switch
+    {
+        TypeDeclarationSyntax t => t.Identifier.Text + (t.TypeParameterList?.ToString() ?? ""),
+        DelegateDeclarationSyntax d => d.Identifier.Text + (d.TypeParameterList?.ToString() ?? ""),
+        BaseTypeDeclarationSyntax b => b.Identifier.Text,
+        _ => m.Kind().ToString(),
     };
 
     private static SyntaxReference? PickDeclaration(INamedTypeSymbol type, string? inFile)

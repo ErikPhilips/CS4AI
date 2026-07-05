@@ -53,7 +53,7 @@ cs4ai inspect  <sess> <addr>            # one type, whole, with its type_… tok
 cs4ai discover <sess> <name>            # census: who references it, what it calls
 
 cs4ai create <sess> <new-fqn>  --set-body <decl>   # new member (cite the type token) or new type
-cs4ai update <sess> <member>   --token <t> --set-body <decl>
+cs4ai update <sess> <addr>     --token <t> --set-body <decl>   # member OR whole type, in place
                                         # facets: --set-comment · --set-namespace · --set-usings
                                         #         --set-attributes · --set-file (type → file)
 cs4ai rename <sess> <addr> <new-name> --token <t>  # semantic rename; call sites rewritten + counted

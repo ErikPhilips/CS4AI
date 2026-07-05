@@ -674,6 +674,59 @@ public class CSEngineTests
         Assert.Contains("class Helper", fx.ReadSource("Brand.cs"));
     }
 
+    // ── update --set-body on a whole TYPE (redeclare in place) ────────────────────────────────────
+
+    [Fact]
+    public async Task Update_SetBody_WholeType_ReplacesInPlace()
+    {
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        // Co-locate a sibling first so the replace provably touches only the addressed type.
+        var c = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Helper",
+                Body = "public class Helper { public int Z() => 0; }", InFile = "Calc.cs",
+            })], default);
+        Assert.Equal(Cs4AiResult.CodeOk, c.ExitCode);
+
+        var token = await TypeTokenAsync(engine, "Acme.Calc");
+        var r = await engine.ExecuteAsync(
+            [Group(token, new Operation
+            {
+                Op = Ops.Update, Source = "Acme.Calc",
+                Body = "public class Calc { public int Mul(int a, int b) => a * b; }",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
+        var onDisk = fx.ReadSource("Calc.cs");
+        Assert.Contains("Mul", onDisk);                  // new declaration landed
+        Assert.DoesNotContain("Add(int a", onDisk);      // old body fully replaced
+        Assert.Contains("class Helper", onDisk);         // sibling untouched, same file
+    }
+
+    [Fact]
+    public async Task Update_SetBody_WholeType_NameMismatch_Rejected()
+    {
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        var token = await TypeTokenAsync(engine, "Acme.Calc");
+        var r = await engine.ExecuteAsync(
+            [Group(token, new Operation
+            {
+                Op = Ops.Update, Source = "Acme.Calc",
+                Body = "public class Other { }",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeUsage, r.ExitCode);
+        Assert.Contains("use `rename`", r.Output ?? r.Error ?? "");
+        Assert.Contains("class Calc", fx.ReadSource("Calc.cs")); // untouched
+    }
+
     // ── create default-file collision (the Result / Result<T> clobber) ────────────────────────────
 
     [Fact]

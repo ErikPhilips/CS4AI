@@ -33,7 +33,8 @@ the target type (also echoed in every edit response):
   (cite the type's token) or new top-level type (no token). Kind comes from the body; namespace
   from the FQN. `--in-file` places the type in that file — co-locates into an existing file
   (namespace must match) or names a new one.
-- `update <sess> <member> --token <type_…> --set-body <decl>` — replace; cascades if the
+- `update <sess> <addr> --token <type_…> --set-body <decl>` — replace a member or a whole
+  type in place (a type's name/arity must match the address); cascades if the
   signature changed. Facets: `--set-comment`, `--set-namespace`, `--set-usings`,
   `--set-attributes '[A],[B]'` (whole-replace), `--set-file <path>` (move a TYPE to a file).
 - `rename <sess> <addr> <new-name> --token <type_…> [--set-file "New.cs"]` · `move <sess>

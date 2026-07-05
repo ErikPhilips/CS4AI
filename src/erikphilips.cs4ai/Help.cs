@@ -145,8 +145,9 @@ internal static class Help
     public const string Update = """
         cs4ai update <sess-token> <address> --token <type_…> [facet]
 
-        Replace a member from its full declaration (--set-body) — the engine diffs and cascades only
-        if the signature changed, reporting which. Or change a facet: --set-comment <xml> (no cascade),
+        Replace a member — or a whole type — from its full declaration (--set-body); a type's name
+        and arity must match the address (use `rename` to change the name). The engine diffs and
+        cascades only if the signature changed, reporting which. Or change a facet: --set-comment <xml> (no cascade),
         --set-namespace <ns> (cascades the FQN), --set-usings <imports> (file imports),
         --set-attributes '[A],[B]' (whole-replace the attributes), --set-file <path> (the file a TYPE
         lives in — intra-project; renames the whole file via git mv when the type is alone, else
@@ -304,7 +305,8 @@ internal static class Help
           (cite the type's token) or new top-level type (no token). Kind comes from the body; namespace
           from the FQN. `--in-file` places the type in that file — co-locates into an existing file
           (namespace must match) or names a new one.
-        - `update <sess> <member> --token <type_…> --set-body <decl>` — replace; cascades if the
+        - `update <sess> <addr> --token <type_…> --set-body <decl>` — replace a member or a whole
+          type in place (a type's name/arity must match the address); cascades if the
           signature changed. Facets: `--set-comment`, `--set-namespace`, `--set-usings`,
           `--set-attributes '[A],[B]'` (whole-replace), `--set-file <path>` (move a TYPE to a file).
         - `rename <sess> <addr> <new-name> --token <type_…> [--set-file "New.cs"]` · `move <sess>
