@@ -347,11 +347,34 @@ internal sealed class CSEngine : ICSEngine
             var folders = (op.Path ?? "").Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
             var filePath = Path.Combine(new[] { projDir }.Concat(folders).Append(fileName).ToArray());
 
-            // Use the (possibly attribute-augmented) member text, not the raw body.
-            var fileText = $"namespace {ns};\n\n{member.ToFullString().TrimEnd()}\n";
-            var newDoc = project.AddDocument(fileName, fileText, folders.Length > 0 ? folders : null, filePath);
-            sol = newDoc.Project.Solution;
-            touchedDocId = newDoc.Id;
+            // Default-name collision (Result then Result<T> both defaulting to Result.cs): a second
+            // AddDocument at the same path forks the in-memory view from disk — write-through clobbers
+            // the first type while the workspace still compiles both, so `build` goes falsely green.
+            // Co-locate into the existing file instead, exactly as a matched --in-file does.
+            var fullPath = Path.GetFullPath(filePath);
+            var collision = project.Documents.FirstOrDefault(d =>
+                d.FilePath is { } fp && string.Equals(Path.GetFullPath(fp), fullPath, StringComparison.OrdinalIgnoreCase));
+            if (collision is not null)
+            {
+                var (coSol, coErr) = await CoLocateTypeAsync(sol, collision.Id, member, ns, ct);
+                if (coErr is { } ce) return (sol, ce, NoRestate);
+                sol = coSol;
+                touchedDocId = collision.Id;
+            }
+            else if (File.Exists(fullPath))
+            {
+                return (sol, Cs4AiResult.FileError(
+                    $"create: '{_relativize(fullPath)}' exists on disk but is not part of the project — " +
+                    "refusing to overwrite it. Name a different file with --in-file."), NoRestate);
+            }
+            else
+            {
+                // Use the (possibly attribute-augmented) member text, not the raw body.
+                var fileText = $"namespace {ns};\n\n{member.ToFullString().TrimEnd()}\n";
+                var newDoc = project.AddDocument(fileName, fileText, folders.Length > 0 ? folders : null, filePath);
+                sol = newDoc.Project.Solution;
+                touchedDocId = newDoc.Id;
+            }
         }
 
         // Best-effort: infer unambiguous usings from compile diagnostics on the touched file. Echoed as
@@ -359,8 +382,10 @@ internal sealed class CSEngine : ICSEngine
         var (afterUsings, added) = await InferUsingsAsync(sol, touchedDocId, ct);
         sol = afterUsings;
 
-        var created = await FindTypeByDocIdAsync(sol, $"T:{ns}.{leaf}", ct)
-                   ?? await FindTypeByDocIdAsync(sol, $"T:{ns}.{leaf}`{ArityOf(plan.NewTypeLeaf!)}", ct);
+        // Arity-exact lookup: with Result and Result<T> now legal side by side, a bare-name probe
+        // would frame the non-generic sibling instead of the type just created.
+        var arity = ArityOf(plan.NewTypeLeaf!);
+        var created = await FindTypeByDocIdAsync(sol, $"T:{ns}.{leaf}{(arity > 0 ? $"`{arity}" : "")}", ct);
         var note = added.Count > 0 ? "inferred-usings: " + string.Join(", ", added) : null;
         return (sol, null, [new Restate(Ops.Create, created?.GetDocumentationCommentId(), FullBody: true, null, note)]);
     }
@@ -952,6 +977,17 @@ internal sealed class CSEngine : ICSEngine
                 $"'{(fileNs.Length == 0 ? "<global>" : fileNs)}', but the type is '{(ns.Length == 0 ? "<global>" : ns)}' — " +
                 "namespaces must match to place a type in a file."));
 
+        // Same name + same arity already declared here → appending would be a duplicate (only legal
+        // when both sides are partial). Different arity (Result vs Result<T>) is fine side by side.
+        var (newName, newArity) = TypeNameArity(type);
+        var siblings = fsn?.Members ?? bn?.Members ?? cu.Members;
+        var dup = siblings.FirstOrDefault(m => TypeNameArity(m) == (newName, newArity));
+        if (dup is not null &&
+            !(type.Modifiers.Any(SyntaxKind.PartialKeyword) && dup.Modifiers.Any(SyntaxKind.PartialKeyword)))
+            return (sol, Cs4AiResult.UsageError(
+                $"create: '{Path.GetFileName(targetDoc.FilePath)}' already declares " +
+                $"'{newName}{(newArity > 0 ? $"<{newArity}>" : "")}' — use `update` to change it or `delete` first."));
+
         // Prepend a blank line so the appended type is separated; keep its own leading trivia
         // (doc comments). Canonicalization of the framed type normalizes the elastic spacing.
         var spaced = type.WithLeadingTrivia(
@@ -965,6 +1001,16 @@ internal sealed class CSEngine : ICSEngine
 
         return (targetDoc.WithSyntaxRoot(newRoot).Project.Solution, null);
     }
+
+    /// <summary>Identifier + generic arity of a type-shaped member; ("", -1) for non-types so they
+    /// never collide with a real name.</summary>
+    private static (string name, int arity) TypeNameArity(MemberDeclarationSyntax m) => m switch
+    {
+        TypeDeclarationSyntax t => (t.Identifier.Text, t.TypeParameterList?.Parameters.Count ?? 0),
+        DelegateDeclarationSyntax d => (d.Identifier.Text, d.TypeParameterList?.Parameters.Count ?? 0),
+        BaseTypeDeclarationSyntax b => (b.Identifier.Text, 0), // enum
+        _ => ("", -1),
+    };
 
     private static SyntaxReference? PickDeclaration(INamedTypeSymbol type, string? inFile)
     {

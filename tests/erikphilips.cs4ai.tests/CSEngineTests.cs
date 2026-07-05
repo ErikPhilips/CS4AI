@@ -674,6 +674,86 @@ public class CSEngineTests
         Assert.Contains("class Helper", fx.ReadSource("Brand.cs"));
     }
 
+    // ── create default-file collision (the Result / Result<T> clobber) ────────────────────────────
+
+    [Fact]
+    public async Task Create_DefaultFileCollision_CoLocates_NoClobber()
+    {
+        // The reported bug: create Result, then create Result<T> — both default to Result.cs. The
+        // second AddDocument at the same path clobbered the first type on disk while the in-memory
+        // view kept both, so `build` reported a false green. Must co-locate instead.
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        var c1 = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Wrap",
+                Body = "public class Wrap { public int Kind { get; set; } }",
+            })], default);
+        Assert.Equal(Cs4AiResult.CodeOk, c1.ExitCode);
+
+        var c2 = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Wrap<T>",
+                Body = "public sealed class Wrap<T> : Wrap { public T? Value { get; set; } }",
+            })], default);
+        Assert.Equal(Cs4AiResult.CodeOk, c2.ExitCode);
+
+        var onDisk = fx.ReadSource("Wrap.cs");
+        Assert.Contains("public class Wrap", onDisk);          // first type survived on disk
+        Assert.Contains("class Wrap<T>", onDisk);              // second co-located beside it
+        var (nonGeneric, e1) = await engine.ResolveAsync("Acme.Wrap", default);
+        var (generic, e2) = await engine.ResolveAsync("Acme.Wrap<T>", default);
+        Assert.Null(e1);
+        Assert.Null(e2);
+        Assert.NotNull(nonGeneric.Symbol);                     // view matches disk — no false green
+        Assert.NotNull(generic.Symbol);
+    }
+
+    [Fact]
+    public async Task Create_SameTypeTwice_Rejected()
+    {
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        // Same name AND same arity in the same file is a duplicate, not a co-location.
+        var r = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Calc",
+                Body = "public class Calc { }",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeUsage, r.ExitCode);
+        Assert.Contains("already declares", r.Output ?? r.Error ?? "");
+        Assert.Contains("Add(int a, int b)", fx.ReadSource("Calc.cs")); // original untouched
+    }
+
+    [Fact]
+    public async Task Create_FileOnDiskButNotInProject_Rejected()
+    {
+        using var fx = new FixtureSolution(Source);
+        var (engine, host) = await EngineAsync(fx);
+        await using var _h = host;
+
+        // On disk but not in the loaded workspace (written after load): never silently overwrite.
+        File.WriteAllText(fx.SourceFile("Stray.cs"), "// not part of the loaded project\n");
+        var r = await engine.ExecuteAsync(
+            [Group(null, new Operation
+            {
+                Op = Ops.Create, Destination = "Acme.Stray",
+                Body = "public class Stray { }",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeFileOrParse, r.ExitCode);
+        Assert.Contains("refusing to overwrite", r.Output ?? r.Error ?? "");
+        Assert.Contains("not part of the loaded project", fx.ReadSource("Stray.cs")); // untouched
+    }
+
     [Fact]
     public async Task CoLocate_ThenSetFile_RoundTrips()
     {

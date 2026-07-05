@@ -19,6 +19,9 @@ internal static class DotnetCli
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            // The daemon runs DETACHED (no console) — without this every dotnet child
+            // allocates its own visible console window on the user's desktop.
+            CreateNoWindow = true,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
 
