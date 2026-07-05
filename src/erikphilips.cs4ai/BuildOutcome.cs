@@ -46,7 +46,9 @@ internal static class BuildOutcomes
 
     /// <summary>Line-free identity key so a diagnostic that merely shifted lines isn't counted as
     /// "new". Same scheme the old errors-only delta used, now spanning warnings too.</summary>
-    private static string Key(Diagnostic d, Func<string?, string> relativize) =>
+    /// <summary>Diagnostic identity for baseline matching — deliberately line-free so line drift
+    /// between edits doesn't churn new-vs-preexisting. Shared with SelfHeal's cs4ai-caused check.</summary>
+    internal static string Key(Diagnostic d, Func<string?, string> relativize) =>
         $"{d.Id}|{relativize(d.Location.GetLineSpan().Path)}|{d.GetMessage()}";
 
     /// <summary>The frozen baseline: every error+warning key present at session open (and after a

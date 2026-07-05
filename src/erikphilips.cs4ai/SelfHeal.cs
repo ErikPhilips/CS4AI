@@ -19,7 +19,8 @@ namespace ErikPhilips.Cs4Ai;
 internal static class SelfHeal
 {
     public static async Task<Solution> QuietBrokenUsingsAsync(
-        Solution sol, Solution baseSol, CancellationToken ct)
+        Solution sol, Solution baseSol, IReadOnlySet<string>? roslynBaseline,
+        Func<string?, string> relativize, CancellationToken ct)
     {
         if (ReferenceEquals(sol, baseSol)) return sol;
 
@@ -29,11 +30,13 @@ internal static class SelfHeal
             .ToList();
 
         foreach (var docId in changedDocIds)
-            sol = await QuietDocAsync(sol, docId, ct);
+            sol = await QuietDocAsync(sol, docId, roslynBaseline, relativize, ct);
         return sol;
     }
 
-    private static async Task<Solution> QuietDocAsync(Solution sol, DocumentId docId, CancellationToken ct)
+    private static async Task<Solution> QuietDocAsync(
+        Solution sol, DocumentId docId, IReadOnlySet<string>? roslynBaseline,
+        Func<string?, string> relativize, CancellationToken ct)
     {
         var doc = sol.GetDocument(docId);
         if (doc is null) return sol;
@@ -43,9 +46,14 @@ internal static class SelfHeal
         var model = await doc.GetSemanticModelAsync(ct);
         if (model is null) return sol;
 
-        // Spans the compiler reports as "namespace/type not found".
+        // Spans the compiler reports as "namespace/type not found" — but ONLY the ones this session
+        // introduced. A CS0246 already in the session baseline was not cs4ai-caused (the stated bar
+        // for a silent fix): on a degraded workspace view every package using looks CS0246-broken,
+        // and removing those is data loss, not cleanup (found live: a rename's write-through
+        // deleted `using FluentAssertions;`/`using Xunit;` that the real build resolved fine).
         var brokenSpans = model.GetDiagnostics(cancellationToken: ct)
             .Where(d => d.Id == "CS0246")
+            .Where(d => roslynBaseline is null || !roslynBaseline.Contains(BuildOutcomes.Key(d, relativize)))
             .Select(d => d.Location.SourceSpan)
             .ToList();
         if (brokenSpans.Count == 0) return sol;
@@ -55,7 +63,9 @@ internal static class SelfHeal
             .ToList();
         if (dead.Count == 0) return sol;
 
-        var newRoot = root.RemoveNodes(dead, SyntaxRemoveOptions.KeepNoTrivia)!;
+        // KeepEndOfLine, not KeepNoTrivia — the latter ate the newline between the last survivor
+        // and the namespace declaration, gluing them onto one line.
+        var newRoot = root.RemoveNodes(dead, SyntaxRemoveOptions.KeepEndOfLine)!;
         return doc.WithSyntaxRoot(newRoot).Project.Solution;
     }
 }

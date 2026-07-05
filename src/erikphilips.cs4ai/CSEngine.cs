@@ -97,8 +97,9 @@ internal sealed class CSEngine : ICSEngine
         }
 
         // Stage 4.5 (Phase 1.5): silently remove using directives this op left broken (CS0246) —
-        // quiet the noise cs4ai created before the result is rendered.
-        sol = await SelfHeal.QuietBrokenUsingsAsync(sol, original, ct);
+        // quiet the noise cs4ai created before the result is rendered. The baseline scopes it to
+        // cs4ai-caused breakage only: a CS0246 that predates the session is never touched.
+        sol = await SelfHeal.QuietBrokenUsingsAsync(sol, original, _session.RoslynBaseline, _relativize, ct);
 
         // Stage 5: WRITE THROUGH. Every op landed in memory → flush the touched files to disk and
         // adopt `sol` as the host's live view. Atomic per command (nothing was written until here);

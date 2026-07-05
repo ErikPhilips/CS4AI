@@ -24,11 +24,26 @@ public class CSEngineTests
 
     private static async Task<(CSEngine engine, SolutionHost host)> EngineAsync(FixtureSolution fx)
     {
+        var (engine, host, _) = await EngineWithSessionAsync(fx);
+        return (engine, host);
+    }
+
+    private static async Task<(CSEngine engine, SolutionHost host, EditSession session)> EngineWithSessionAsync(
+        FixtureSolution fx)
+    {
         var host = new SolutionHost(fx.SlnxPath);
         await host.GetCommittedSolutionAsync(default); // load the live view (no full build — engine-direct)
         var session = new EditSession { Token = "sess_test.0" };
         var engine = new CSEngine(host, session, Cs4AiConfig.Preset("sa1201"));
-        return (engine, host);
+        return (engine, host, session);
+    }
+
+    /// <summary>Seed the session's Roslyn baseline from the current view — the way session open
+    /// does — so SelfHeal's cs4ai-caused guard has a floor to compare against.</summary>
+    private static async Task SeedBaselineAsync(SolutionHost host, EditSession session)
+    {
+        session.RoslynBaseline = (await BuildOutcomes.BaselineKeysAsync(
+            await host.GetCommittedSolutionAsync(default), host.Relativize, default)).keys;
     }
 
     private static async Task<string> TypeTokenAsync(CSEngine engine, string fqn)
@@ -308,8 +323,9 @@ public class CSEngineTests
         File.WriteAllText(Path.Combine(fx.SrcDir, "Consumer.cs"),
             "using Acme;\n\nnamespace Other;\n\npublic class Consumer { public int U() => new Calc().V(); }");
 
-        var (engine, host) = await EngineAsync(fx);
+        var (engine, host, session) = await EngineWithSessionAsync(fx);
         await using var _h = host;
+        await SeedBaselineAsync(host, session); // guard active: only NEW CS0246s may be healed
 
         // Move Calc to an UNRELATED namespace → Acme stops existing → `using Acme;` breaks (CS0246).
         var token = await TypeTokenAsync(engine, "Acme.Calc");
@@ -322,6 +338,41 @@ public class CSEngineTests
         var text = (await consumer.GetTextAsync()).ToString();
         Assert.Contains("using Foo;", text);          // cascade added the new namespace
         Assert.DoesNotContain("using Acme;", text);   // self-heal silently removed the now-broken one
+    }
+
+    [Fact]
+    public async Task SelfHeal_PreexistingBrokenUsing_LeftAlone()
+    {
+        // The field incident (issue #16): on a degraded workspace view, valid package usings look
+        // CS0246-broken from session open. SelfHeal must never touch a using it didn't break —
+        // preexisting CS0246 is in the baseline, so the guard leaves it (and its file) alone.
+        const string src = """
+            using Does.Not.Exist;
+
+            namespace Acme;
+
+            public class Calc
+            {
+                public int Add(int a, int b) => a + b;
+            }
+            """;
+        using var fx = new FixtureSolution(src);
+        var (engine, host, session) = await EngineWithSessionAsync(fx);
+        await using var _h = host;
+        await SeedBaselineAsync(host, session); // the broken using predates the session
+
+        var token = await TypeTokenAsync(engine, "Acme.Calc");
+        var r = await engine.ExecuteAsync(
+            [Group(token, new Operation
+            {
+                Op = Ops.Update, Source = "Acme.Calc.Add(int,int)",
+                Body = "public int Add(int a, int b) => a + b + 1;",
+            })], default);
+
+        Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
+        var text = fx.ReadSource("Calc.cs");
+        Assert.Contains("+ b + 1", text);                 // the edit landed
+        Assert.Contains("using Does.Not.Exist;", text);   // not cs4ai-caused — untouched
     }
 
     [Fact]
