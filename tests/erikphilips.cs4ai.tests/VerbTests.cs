@@ -288,6 +288,38 @@ public class VerbTests
         Assert.Contains("Types: [", r.Output!);
     }
 
+    [Fact]
+    public async Task Discover_TwoCallsOneLine_CollapsedWithCount()
+    {
+        // Two occurrences on one physical line used to render as duplicate entries — looked like a
+        // glitch (issue #5). One entry per line, ×N for multiples, header count stays per-occurrence.
+        const string src = """
+            namespace Acme;
+
+            public class Money
+            {
+                public static int From(int x) => x;
+            }
+
+            public class Uses
+            {
+                public int A() => Money.From(1) + Money.From(2);
+                public int B() => Money.From(3);
+            }
+            """;
+        using var fx = new FixtureSolution(src);
+        var (m, sess) = await OpenAsync(fx);
+        await using var _ = m;
+
+        var r = await m.ExecuteAsync(["discover", sess, "From"]);
+        Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
+        var output = r.Output!;
+        Assert.Contains("Referenced by: [3]", output);                    // occurrence-true total
+        Assert.Contains("Calc.cs:10 ×2", output);                         // collapsed, annotated
+        Assert.Contains("Calc.cs:11", output);                            // single stays bare
+        Assert.Equal(1, output.Split("Calc.cs:10").Length - 1);           // :10 appears exactly once
+    }
+
     // ── write-through edits ────────────────────────────────────────────────────────────────────────
 
     [Fact]
