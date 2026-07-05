@@ -407,7 +407,8 @@ public class CSEngineTests
 
         Assert.Equal(Cs4AiResult.CodeOk, r.ExitCode);
         Assert.Contains(".Plus(", fx.ReadSource("Caller.cs"));                    // cascade landed
-        Assert.Contains("references-rewritten: 1 other file", r.Output ?? "");    // …and is visible
+        // Caller.cs carries two Add calls — the note counts refs (discover's unit), then files.
+        Assert.Contains("references-rewritten: 2 refs across 1 other file", r.Output ?? "");
         Assert.Contains("Caller.cs", r.Output ?? "");
     }
 

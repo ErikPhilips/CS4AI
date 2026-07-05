@@ -162,9 +162,16 @@ internal static class Reads
 
             if (sym is IMethodSymbol method)
             {
+                // Same glossary as incoming: calls (occurrences) vs methods (distinct callees),
+                // dual-form header only when they differ, ×N on repeated callees.
                 var outgoing = await OutgoingCallsAsync(view!, method, ct);
-                sb.Append("References: [").Append(outgoing.Count).AppendLine("]");
-                foreach (var o in outgoing) sb.Append("  ").AppendLine(o);
+                var totalCalls = outgoing.Sum(o => o.count);
+                sb.Append("References: [").Append(Plural(totalCalls, "call"));
+                if (outgoing.Count != totalCalls)
+                    sb.Append(" · ").Append(Plural(outgoing.Count, "method"));
+                sb.AppendLine("]");
+                foreach (var (addr, count) in outgoing)
+                    sb.Append("  ").Append(addr).AppendLine(count > 1 ? $" ×{count}" : "");
                 if (outgoing.Count == 0) sb.AppendLine("  (none)");
             }
         }
@@ -181,10 +188,10 @@ internal static class Reads
             sb.Append("  ").AppendLine(AddressResolver.RenderWithSignature(s));
     }
 
-    private static async Task<List<string>> OutgoingCallsAsync(
+    private static async Task<List<(string addr, int count)>> OutgoingCallsAsync(
         Solution solution, IMethodSymbol method, CancellationToken ct)
     {
-        var outgoing = new HashSet<string>(StringComparer.Ordinal);
+        var outgoing = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var declRef in method.DeclaringSyntaxReferences)
         {
             var node = await declRef.GetSyntaxAsync(ct);
@@ -194,8 +201,12 @@ internal static class Reads
             if (model is null) continue;
             foreach (var invoc in node.DescendantNodes().OfType<InvocationExpressionSyntax>())
                 if (model.GetSymbolInfo(invoc, ct).Symbol is IMethodSymbol called)
-                    outgoing.Add(AddressResolver.Render(called));
+                {
+                    var addr = AddressResolver.Render(called);
+                    outgoing[addr] = outgoing.GetValueOrDefault(addr) + 1;
+                }
         }
-        return outgoing.OrderBy(x => x, StringComparer.Ordinal).ToList();
+        return outgoing.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                       .Select(kv => (kv.Key, kv.Value)).ToList();
     }
 }
