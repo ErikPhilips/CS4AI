@@ -318,6 +318,12 @@ public class VerbTests
         Assert.Contains("Calc.cs:10 ×2", output);                         // collapsed, annotated
         Assert.Contains("Calc.cs:11", output);                            // single stays bare
         Assert.Equal(1, output.Split("Calc.cs:10").Length - 1);           // :10 appears exactly once
+
+        // Outgoing side speaks the same glossary: calls (occurrences) vs methods (distinct).
+        var a = await m.ExecuteAsync(["discover", sess, "A"]);
+        Assert.Equal(Cs4AiResult.CodeOk, a.ExitCode);
+        Assert.Contains("References: [2 calls · 1 method]", a.Output!);
+        Assert.Contains("From ×2", a.Output!);
     }
 
     // ── write-through edits ────────────────────────────────────────────────────────────────────────

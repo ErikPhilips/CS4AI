@@ -732,17 +732,24 @@ internal sealed class CSEngine : ICSEngine
             .Where(p => !string.IsNullOrEmpty(p))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var cascadeFiles = new List<string>();
+        var cascadeRefs = 0;
         var touchedPaths = new HashSet<string>(declPaths, StringComparer.OrdinalIgnoreCase);
         foreach (var pc in newSol.GetChanges(sol).GetProjectChanges())
             foreach (var did in pc.GetChangedDocuments(onlyGetDocumentsWithTextChanges: true))
             {
-                var p = newSol.GetDocument(did)?.FilePath;
+                var newDoc = newSol.GetDocument(did);
+                var p = newDoc?.FilePath;
                 if (p is null) continue;
                 touchedPaths.Add(p);
-                if (!declPaths.Contains(p)) cascadeFiles.Add(_relativize(p));
+                if (declPaths.Contains(p)) continue;
+                cascadeFiles.Add(_relativize(p));
+                // One text change ≈ one rewritten reference — the unit discover calls "refs".
+                if (sol.GetDocument(did) is { } oldDoc)
+                    cascadeRefs += (await newDoc!.GetTextChangesAsync(oldDoc, ct)).Count();
             }
         var cascadeNote = cascadeFiles.Count > 0
-            ? $"references-rewritten: {cascadeFiles.Count} other file{(cascadeFiles.Count == 1 ? "" : "s")} · " +
+            ? $"references-rewritten: {cascadeRefs} ref{(cascadeRefs == 1 ? "" : "s")} across " +
+              $"{cascadeFiles.Count} other file{(cascadeFiles.Count == 1 ? "" : "s")} · " +
               string.Join(", ", cascadeFiles.OrderBy(p => p, StringComparer.Ordinal))
             : null;
 
