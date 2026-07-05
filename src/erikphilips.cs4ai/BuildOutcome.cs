@@ -80,10 +80,14 @@ internal static class BuildOutcomes
         {
             var key = Key(d, relativize);
             currentKeys.Add(key);
-            if (!seen.Add(key)) continue; // dedup by signature (a duplicate isn't a new problem)
+            var span = d.Location.GetLineSpan();
+            // Display dedup INCLUDES the line: same signature on the same line is a true duplicate
+            // (multi-TFM emits those); the same message on a DIFFERENT line is a distinct problem
+            // and must render (found live: 4 compiler errors displayed as 3 — the hidden one sent
+            // the agent chasing "why is line 25 fine?"). Baseline matching stays line-free.
+            if (!seen.Add($"{key}|{span.StartLinePosition.Line}")) continue;
 
             var isNew = !baseline.Contains(key);
-            var span = d.Location.GetLineSpan();
             var severity = d.Severity == DiagnosticSeverity.Error ? "error" : "warning";
             diagnostics.Add(new BuildDiagnostic(
                 severity, d.Id, relativize(span.Path), span.StartLinePosition.Line + 1,
@@ -133,7 +137,8 @@ internal static class BuildOutcomes
         {
             var key = BuildKey(d, relativize);
             currentKeys.Add(key);
-            if (!seen.Add(key)) continue;
+            // Same rule as the Roslyn path: line-inclusive display dedup, line-free baseline identity.
+            if (!seen.Add($"{key}|{d.Line}")) continue;
 
             var isNew = !baseline.Contains(key);
             list.Add(new BuildDiagnostic(d.Severity, d.Code, relativize(d.Path), d.Line, d.Message,
