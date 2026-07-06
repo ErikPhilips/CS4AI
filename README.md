@@ -5,6 +5,10 @@ codebase the way an IDE sits between a human and code — but built for the agen
 constraint profile: minimum sufficient context, semantic operations not textual, staleness-checked
 writes, and one result grammar to learn.
 
+**▶ Watch it work** — a live agent session, end to end:
+
+[![cs4ai demo — a live agent session](https://img.youtube.com/vi/wSR4XlUba9I/maxresdefault.jpg)](https://www.youtube.com/watch?v=wSR4XlUba9I)
+
 **Status: release candidate.** The v2 surface is implemented end-to-end and has been sanded by two
 adversarial stress gauntlets (every finding fixed; 138 tests green): the transparent auto-daemon
 (named pipe per solution, warm Roslyn workspace, zero handle leakage into the caller), the
